@@ -1,171 +1,272 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="sunset">
 <head>
   <meta charset="utf-8" />
-  <title>Convertidor</title>
+  <title>Multimedia Knowledge S.L — Media Converter & Downloader</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet"/>
 </head>
 <body class="min-h-screen bg-base-200">
-  <div class="max-w-3xl mx-auto p-6 space-y-8">
+  <div class="max-w-4xl mx-auto p-6 md:p-10 space-y-10">
+
+    <!-- =============== HEADER / BRAND =============== -->
+    <header class="text-center space-y-4">
+      <img src="/static/MT_logo.png" alt="Multimedia Knowledge S.L" class="w-40 mx-auto" />
+      <h1 class="text-3xl md:text-4xl font-extrabold">MCD</h1>
+      <p class="opacity-70"><p>Media Converter & Downloader </p> Herramientas de conversión y descarga de medios</p>
+    </header>
+
+    <!-- =============== MENÚ PRINCIPAL =============== -->
+    <div id="menu" class="flex justify-center gap-4">
+      <button class="btn btn-primary" onclick="showSection('convert')">Converter</button>
+      <button class="btn btn-secondary" onclick="showSection('downloader')">Downloader</button>
+    </div>
 
     <!-- =============== CONVERTIDOR =============== -->
-    <div class="card bg-base-100 shadow-xl">
-      <div class="card-body gap-3">
-        <h1 class="card-title">Convertidor de archivos</h1>
-        <p class="text-sm opacity-70">1) Selecciona un archivo · 2) Elige formato destino</p>
+    <section id="convertSection" class="hidden">
+      <div class="card bg-base-100 shadow-xl">
+        <div class="card-body gap-3">
+          <div class="flex items-start justify-between">
+            <h2 class="card-title">Convertidor de archivos</h2>
+            <button class="btn btn-ghost btn-sm" onclick="backToMenu()">Volver al menú</button>
+          </div>
 
-        <div class="flex items-center gap-3">
-          <input id="file" type="file" class="file-input file-input-bordered" />
-          <span id="fileBadge" class="badge badge-outline hidden"></span>
+          <p class="text-sm opacity-70">1) Selecciona un archivo · 2) Elige formato destino</p>
+
+          <div class="flex items-center gap-3">
+            <input id="file" type="file" class="file-input file-input-bordered" />
+            <span id="fileBadge" class="badge badge-outline hidden"></span>
+          </div>
+
+          <div id="options" class="hidden">
+            <div class="divider my-2">Convertir a</div>
+            <div id="targets" class="flex flex-wrap gap-2"></div>
+          </div>
+
+          <progress id="prog" class="progress w-full hidden"></progress>
+          <div id="status" class="text-sm"></div>
+          <div id="download" class="mt-2"></div>
+
+          <div class="card-actions justify-end mt-4">
+            <button class="btn btn-secondary" onclick="backToMenu()">⬅ Volver al menú</button>
+          </div>
         </div>
-
-        <div id="options" class="hidden">
-          <div class="divider my-2">Convertir a</div>
-          <div id="targets" class="flex flex-wrap gap-2"></div>
-        </div>
-
-        <progress id="prog" class="progress w-full hidden"></progress>
-        <div id="status" class="text-sm"></div>
-        <div id="download" class="mt-2"></div>
       </div>
-    </div>
+    </section>
 
-    <!-- =============== DESCARGA POR URL =============== -->
-    <div class="card bg-base-100 shadow-xl">
-      <div class="card-body gap-3">
-        <h2 class="card-title">Descargar desde URL (YouTube, Instagram, Facebook, X…)</h2>
+    <!-- =============== DOWNLOADER =============== -->
+    <section id="downloaderSection" class="hidden">
+      <div class="card bg-base-100 shadow-xl">
+        <div class="card-body gap-3">
+          <div class="flex items-start justify-between">
+            <h2 class="card-title">Descargar desde URL (YouTube, Instagram, Facebook, X…)</h2>
+            <button class="btn btn-ghost btn-sm" onclick="backToMenu()">Volver al menú</button>
+          </div>
 
-        <div class="flex flex-col md:flex-row gap-3">
-          <input id="urlInput" type="url" placeholder="Pega aquí la URL del vídeo o imagen"
-                 class="input input-bordered flex-1"/>
-          <select id="dlKind" class="select select-bordered">
-            <option value="video">Video MP4</option>
-            <option value="audio">Audio MP3</option>
-          </select>
-          <select id="dlQuality" class="select select-bordered">
-            <!-- se rellena según kind -->
-          </select>
-          <button class="btn btn-primary" onclick="startFetch()">Descargar</button>
+          <div class="flex flex-col md:flex-row gap-3">
+            <input id="urlInput" type="url" placeholder="Pega aquí la URL del vídeo o imagen"
+                   class="input input-bordered flex-1"/>
+            <select id="dlKind" class="select select-bordered">
+              <option value="video">Video MP4</option>
+              <option value="audio">Audio MP3</option>
+            </select>
+            <select id="dlQuality" class="select select-bordered w-36"></select>
+            <button type="button" class="btn btn-primary" onclick="startFetch()">Descargar</button>
+          </div>
+
+          <progress id="prog2" class="progress w-full hidden"></progress>
+          <div id="status2" class="text-sm"></div>
+          <div id="download2" class="mt-2"></div>
+
+          <div class="card-actions justify-end mt-4">
+            <button class="btn btn-secondary" onclick="backToMenu()">⬅ Volver al menú</button>
+          </div>
         </div>
-
-        <progress id="prog2" class="progress w-full hidden"></progress>
-        <div id="status2" class="text-sm"></div>
-        <div id="download2" class="mt-2"></div>
       </div>
-    </div>
+    </section>
+    <!-- =============== Promoción web=============== -->
+    <section>
+      <div style="text-align: center;">
+        <h1 class="opacity-70">
+          Visitanos en nuestra pagina web
+          <a href="https://www.mtknowledge.com" style="text-decoration:wavy;">www.mtknowledge.com</a>
+        </h1>
+      </div>
+</section>
   </div>
-<script src="/static/app.js"></script>
-<script>
-  // ---------- catálogos para convertidor ----------
-  const MAP = {
-    image: {
-      exts: ["jpg","jpeg","png","webp","gif","bmp","tif","tiff","heic","heif","ico","svg","avif","psd","exr","jp2","jfi","jif","jfif","jpe"],
-      targets: ["jpg","png","webp","avif","gif","bmp","tiff","ico","svg","heic","heif","psd","exr","jp2"]
-    },
-    video: {
-      exts: ["mp4","mov","mkv","avi","webm","m4v","mpeg","mpg","ts","3gp","3g2","ogv","flv"],
-      targets: ["mp4","webm","mkv","mov","avi","m4v","mpeg","mpg","ts","3gp","3g2","ogv","flv","gif"]
-    },
-    mesh: {
-      exts: ["stl","obj","glb","gltf","fbx","ply","3ds","dae","off","x","3mf","plyb"],
-      targets: ["glb","gltf","obj","stl","ply","plyb","fbx","3mf","3ds","dae","x","off"]
+
+  <!-- utilidades -->
+  <script src="/static/app.js"></script>
+
+  <!-- lógica principal -->
+  <script>
+    // ======= Navegación entre vistas =======
+    function showSection(which) {
+      document.getElementById('menu').classList.add('hidden');
+      document.getElementById('convertSection').classList.add('hidden');
+      document.getElementById('downloaderSection').classList.add('hidden');
+
+      if (which === 'convert') {
+        document.getElementById('convertSection').classList.remove('hidden');
+      }
+      if (which === 'downloader') {
+        document.getElementById('downloaderSection').classList.remove('hidden');
+        if (typeof window.fillQuality === 'function') window.fillQuality();
+        const url = document.getElementById('urlInput'); if (url) url.focus();
+      }
+
+      if (typeof window.resetForms === 'function') window.resetForms();
     }
-  };
 
-  const $ = s => document.querySelector(s);
-  const fileInput = $("#file"), fileBadge=$("#fileBadge"),
-        optionsBox=$("#options"), targetsBox=$("#targets"),
-        prog=$("#prog"), status=$("#status"), download=$("#download");
-
-  // render helper select + botón
-  function renderSelect(kind, list){
-    targetsBox.innerHTML="";
-    const wrap=document.createElement("div");
-    wrap.className="flex flex-wrap items-center gap-3";
-    const sel=document.createElement("select");
-    sel.className="select select-bordered"; sel.id=`${kind}Target`;
-    list.forEach(fmt=>{ const o=document.createElement("option"); o.value=fmt; o.textContent=fmt.toUpperCase(); sel.appendChild(o); });
-    const btn=document.createElement("button"); btn.className="btn btn-primary"; btn.textContent="Convertir";
-    btn.onclick=()=>startConvert(kind, sel.value);
-    wrap.appendChild(sel); wrap.appendChild(btn);
-    targetsBox.appendChild(wrap);
-    optionsBox.classList.remove("hidden");
-  }
-
-  const getExt = n => n.includes(".") ? n.split(".").pop().toLowerCase() : "";
-  function detectKindByExt(ext){
-    for (const k of Object.keys(MAP)) if (MAP[k].exts.includes(ext)) return k;
-    return null;
-  }
-
-  window.startConvert = async function startConvert(kind, target){
-    const f=fileInput.files[0]; if(!f) return alert("Selecciona un archivo primero");
-    prog.classList.remove("hidden"); status.textContent="Subiendo archivo…"; download.innerHTML="";
-    const fd=new FormData(); fd.append("file",f); fd.append("kind",kind); fd.append("target",target);
-    try{
-      const r=await fetch("/convert",{method:"POST",body:fd}); const {task_id}=await r.json();
-      status.textContent="Procesando…";
-      const poll=setInterval(async()=>{
-        const s=await fetch("/status/"+task_id).then(x=>x.json());
-        status.textContent="Estado: "+s.state;
-        if(s.state==="SUCCESS"){ clearInterval(poll); prog.classList.add("hidden");
-          const url=s.result?.download_url; download.innerHTML= url ? `<a class="btn btn-success" target="_blank" href="${url}">Descargar archivo</a>` : "Terminado sin URL.";
-          resetForms();   // <-- limpiar formulario
-        }
-        if(s.state==="FAILURE"){ clearInterval(poll); prog.classList.add("hidden"); status.textContent="Error: "+(s.info||"Fallo"); }
-      },1500);
-    }catch(e){ prog.classList.add("hidden"); status.textContent="Error: "+e.message; }
-  }
-
-  fileInput.addEventListener("change", ()=>{
-    status.textContent=""; download.innerHTML=""; prog.classList.add("hidden"); targetsBox.innerHTML="";
-    const f=fileInput.files[0]; if(!f){ fileBadge.classList.add("hidden"); return; }
-    const ext=getExt(f.name); const kind=detectKindByExt(ext);
-    if(!kind){ fileBadge.textContent=`Tipo no soportado: .${ext}`; fileBadge.classList.remove("hidden"); optionsBox.classList.add("hidden"); return; }
-    fileBadge.textContent=`Detectado: ${kind.toUpperCase()} (.${ext})`; fileBadge.classList.remove("hidden");
-    renderSelect(kind, MAP[kind].targets);
-  });
-
-  // ---------- Descarga por URL ----------
-  const urlInput=$("#urlInput"), dlKind=$("#dlKind"), dlQuality=$("#dlQuality"),
-        prog2=$("#prog2"), status2=$("#status2"), download2=$("#download2");
-
-  function fillQuality(){
-    download2.innerHTML=""; status2.textContent="";
-    dlQuality.innerHTML="";
-    if(dlKind.value==="video"){
-      ["best","1080p","720p","480p","360p"].forEach(q=>{
-        const o=document.createElement("option"); o.value=q; o.textContent=`${q}`; dlQuality.appendChild(o);
-      });
-    }else{
-      [{"v":"best","t":"best"},{"v":"256k","t":"256 kbps"},{"v":"128k","t":"128 kbps"}].forEach(({v,t})=>{
-        const o=document.createElement("option"); o.value=v; o.textContent=t; dlQuality.appendChild(o);
-      });
+    function backToMenu() {
+      if (typeof window.resetForms === 'function') window.resetForms();
+      document.getElementById('convertSection').classList.add('hidden');
+      document.getElementById('downloaderSection').classList.add('hidden');
+      document.getElementById('menu').classList.remove('hidden');
     }
-  }
-  dlKind.addEventListener("change", fillQuality); fillQuality();
 
-  window.startFetch = async function startFetch(){
-    const url=urlInput.value.trim(); if(!url) return alert("Pega una URL");
-    const kind=dlKind.value, quality=dlQuality.value;
-    prog2.classList.remove("hidden"); status2.textContent="Iniciando descarga…"; download2.innerHTML="";
-    const fd=new FormData(); fd.append("url",url); fd.append("kind",kind); fd.append("quality",quality);
-    try{
-      const r=await fetch("/fetch",{method:"POST",body:fd}); const {task_id}=await r.json();
-      status2.textContent="Descargando…";
-      const poll=setInterval(async()=>{
-        const s=await fetch("/status/"+task_id).then(x=>x.json());
-        status2.textContent="Estado: "+s.state;
-        if(s.state==="SUCCESS"){ clearInterval(poll); prog2.classList.add("hidden");
-          const u=s.result?.download_url; download2.innerHTML= u ? `<a class="btn btn-success" target="_blank" href="${u}">Abrir/Descargar</a>` : "Terminado sin URL.";
-          resetForms();   // <-- limpiar formulario
-        }
-        if(s.state==="FAILURE"){ clearInterval(poll); prog2.classList.add("hidden"); status2.textContent="Error: "+(s.info||"Fallo"); }
-      },1500);
-    }catch(e){ prog2.classList.add("hidden"); status2.textContent="Error: "+e.message; }
-  }
-</script>
+    // ---------- catálogos para convertidor ----------
+    const MAP = {
+      image: {
+        exts: ["jpg","jpeg","png","webp","gif","bmp","tif","tiff","heic","heif","ico","svg","avif","psd","exr","jp2","jfi","jif","jfif","jpe"],
+        targets: ["jpg","png","webp","avif","gif","bmp","tiff","ico","svg","heic","heif","psd","exr","jp2"]
+      },
+      video: {
+        exts: ["mp4","mov","mkv","avi","webm","m4v","mpeg","mpg","ts","3gp","3g2","ogv","flv"],
+        targets: ["mp4","webm","mkv","mov","avi","m4v","mpeg","mpg","ts","3gp","3g2","ogv","flv","gif"]
+      },
+      mesh: {
+        exts: ["stl","obj","glb","gltf","fbx","ply","3ds","dae","off","x","3mf","plyb"],
+        targets: ["glb","gltf","obj","stl","ply","plyb","fbx","3mf","3ds","dae","x","off"]
+      }
+    };
+
+    const $ = s => document.querySelector(s);
+    const fileInput = $("#file"), fileBadge=$("#fileBadge"),
+          optionsBox=$("#options"), targetsBox=$("#targets"),
+          prog=$("#prog"), status=$("#status"), download=$("#download");
+
+    function renderSelect(kind, list){
+      targetsBox.innerHTML="";
+      const wrap=document.createElement("div");
+      wrap.className="flex flex-wrap items-center gap-3";
+      const sel=document.createElement("select");
+      sel.className="select select-bordered"; sel.id=`${kind}Target`;
+      list.forEach(fmt=>{
+        const o=document.createElement("option"); o.value=fmt; o.textContent=fmt.toUpperCase(); sel.appendChild(o);
+      });
+      const btn=document.createElement("button");
+      btn.type="button";
+      btn.className="btn btn-primary";
+      btn.textContent="Convertir";
+      btn.onclick=()=>startConvert(kind, sel.value);
+      wrap.appendChild(sel); wrap.appendChild(btn);
+      targetsBox.appendChild(wrap);
+      optionsBox.classList.remove("hidden");
+    }
+
+    const getExt = n => n.includes(".") ? n.split(".").pop().toLowerCase() : "";
+    function detectKindByExt(ext){
+      for (const k of Object.keys(MAP)) if (MAP[k].exts.includes(ext)) return k;
+      return null;
+    }
+
+    window.startConvert = async function startConvert(kind, target){
+      const f=fileInput.files[0]; if(!f) return alert("Selecciona un archivo primero");
+      prog.classList.remove("hidden"); status.textContent="Subiendo archivo…"; download.innerHTML="";
+      const fd=new FormData(); fd.append("file",f); fd.append("kind",kind); fd.append("target",target);
+      try{
+        const r=await fetch("/convert",{method:"POST",body:fd}); const {task_id}=await r.json();
+        status.textContent="Procesando…";
+        const poll=setInterval(async()=>{
+          const s=await fetch("/status/"+task_id).then(x=>x.json());
+          status.textContent="Estado: "+s.state;
+          if(s.state==="SUCCESS"){
+            clearInterval(poll); prog.classList.add("hidden");
+            const url=s.result?.download_url;
+            download.innerHTML = url
+              ? `<a class="btn btn-success" target="_blank" href="${url}">Descargar archivo</a>`
+              : "Terminado sin URL.";
+            // (NO limpiar aquí)
+          }
+          if(s.state==="FAILURE"){
+            clearInterval(poll); prog.classList.add("hidden");
+            status.textContent="Error: "+(s.info||"Fallo");
+          }
+        },1500);
+      }catch(e){
+        prog.classList.add("hidden"); status.textContent="Error: "+e.message;
+      }
+    }
+
+    fileInput.addEventListener("change", ()=>{
+      status.textContent=""; download.innerHTML=""; prog.classList.add("hidden"); targetsBox.innerHTML="";
+      const f=fileInput.files[0]; if(!f){ fileBadge.classList.add("hidden"); return; }
+      const ext=getExt(f.name); const kind=detectKindByExt(ext);
+      if(!kind){
+        fileBadge.textContent=`Tipo no soportado: .${ext}`;
+        fileBadge.classList.remove("hidden");
+        optionsBox.classList.add("hidden");
+        return;
+      }
+      fileBadge.textContent=`Detectado: ${kind.toUpperCase()} (.${ext})`;
+      fileBadge.classList.remove("hidden");
+      renderSelect(kind, MAP[kind].targets);
+    });
+
+    // ---------- Descarga por URL ----------
+    const urlInput=$("#urlInput"), dlKind=$("#dlKind"), dlQuality=$("#dlQuality"),
+          prog2=$("#prog2"), status2=$("#status2"), download2=$("#download2");
+
+    window.fillQuality = function fillQuality(){
+      download2.innerHTML=""; status2.textContent="";
+      dlQuality.innerHTML="";
+      if(dlKind.value==="video"){
+        ["best","1080p","720p","480p","360p"].forEach(q=>{
+          const o=document.createElement("option"); o.value=q; o.textContent=q; dlQuality.appendChild(o);
+        });
+      }else{
+        [{v:"best",t:"best"},{v:"256k",t:"256 kbps"},{v:"128k",t:"128 kbps"}].forEach(({v,t})=>{
+          const o=document.createElement("option"); o.value=v; o.textContent=t; dlQuality.appendChild(o);
+        });
+      }
+    }
+    dlKind.addEventListener("change", window.fillQuality);
+
+    window.startFetch = async function startFetch(){
+      const url=urlInput.value.trim(); if(!url) return alert("Pega una URL");
+      const kind=dlKind.value, quality=dlQuality.value;
+      prog2.classList.remove("hidden"); status2.textContent="Iniciando descarga…"; download2.innerHTML="";
+      const fd=new FormData(); fd.append("url",url); fd.append("kind",kind); fd.append("quality",quality);
+      try{
+        const r=await fetch("/fetch",{method:"POST",body:fd}); const {task_id}=await r.json();
+        status2.textContent="Descargando…";
+        const poll=setInterval(async()=>{
+          const s=await fetch("/status/"+task_id).then(x=>x.json());
+          status2.textContent="Estado: "+s.state;
+          if(s.state==="SUCCESS"){
+            clearInterval(poll); prog2.classList.add("hidden");
+            const u=s.result?.download_url;
+            download2.innerHTML = u
+              ? `<a class="btn btn-success" target="_blank" href="${u}">Abrir/Descargar</a>`
+              : "Terminado sin URL.";
+            // (NO limpiar aquí)
+          }
+          if(s.state==="FAILURE"){
+            clearInterval(poll); prog2.classList.add("hidden");
+            status2.textContent="Error: "+(s.info||"Fallo");
+          }
+        },1500);
+      }catch(e){
+        prog2.classList.add("hidden"); status2.textContent="Error: "+e.message;
+      }
+    }
+
+    // Inicializa (por si entras directo a Downloader)
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof window.fillQuality === 'function') window.fillQuality();
+    });
+  </script>
 </body>
 </html>

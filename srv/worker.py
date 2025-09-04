@@ -2,6 +2,7 @@ import os, uuid, shutil, tempfile, subprocess
 from celery import Celery
 import boto3
 from urllib.parse import urlparse
+from botocore.exceptions import ClientError  # 👈 añadido
 
 # ====== Config ======
 REDIS_URL  = os.getenv("REDIS_URL", "redis://redis:6379/0")
@@ -21,8 +22,64 @@ s3 = boto3.client(
     aws_secret_access_key=MINIO_SEC,
 )
 
+# ====== Ensure bucket ======
+def ensure_bucket():
+    try:
+        s3.head_bucket(Bucket=BUCKET)
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code")
+        if code in ("404", "NoSuchBucket", "NotFound"):
+            s3.create_bucket(Bucket=BUCKET)
+        else:
+            raise
+
 # ====== Utils ======
+# ====== Helpers IM/FFmpeg para imágenes ======
+def _im_bin():
+    # En Debian IM7 trae "magick"; en otros, "convert"
+    return "magick" if shutil.which("magick") else "convert"
+
+def convert_image_im(input_path: str, out_path: str, ext: str):
+    """Conversión con ImageMagick para todos los formatos de imagen."""
+    IM = _im_bin()
+    t = ext.lower()
+
+    # Argumentos por formato
+    per_fmt = {
+        "jpg":  ["-auto-orient", "-strip", "-colorspace", "sRGB", "-interlace", "Plane", "-quality", "90"],
+        "jpeg": ["-auto-orient", "-strip", "-colorspace", "sRGB", "-interlace", "Plane", "-quality", "90"],
+        "png":  ["-auto-orient", "-strip", "-define", "png:compression-level=9"],
+        "bmp":  ["-auto-orient"],
+        "tiff": ["-auto-orient"],
+        "webp": ["-auto-orient", "-strip", "-define", "webp:method=6", "-quality", "90"],
+        "avif": ["-auto-orient", "-strip", "-define", "heic:speed=4", "-quality", "50"],
+        "heic": ["-auto-orient", "-strip", "-quality", "90"],
+        "heif": ["-auto-orient", "-strip", "-quality", "90"],
+        "jp2":  ["-auto-orient", "-strip", "-quality", "35"],
+        "psd":  ["-auto-orient"],
+        "exr":  ["-auto-orient", "-colorspace", "RGB"],  # evita perfiles raros
+        "gif":  ["-auto-orient"],                        # imagen estática
+        # ico lo tratamos aparte (multi-res)
+    }
+
+    if t == "ico":
+        # ICO multi-tamaño: 16/32/48/64
+        cmd = (
+            f'{IM} '
+            f'( "{input_path}" -resize 16x16 ) '
+            f'( "{input_path}" -resize 32x32 ) '
+            f'( "{input_path}" -resize 48x48 ) '
+            f'( "{input_path}" -resize 64x64 ) '
+            f'"{out_path}"'
+        )
+    else:
+        args = " ".join(per_fmt.get(t, []))
+        cmd = f'{IM} "{input_path}" {args} "{out_path}"'
+
+    run(cmd)
+
 def run(cmd: str) -> str:
+    """Ejecuta comando y devuelve salida; lanza excepción si RC != 0."""
     p = subprocess.run(
         cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, timeout=TASK_TIMEOUT_SECS
@@ -32,6 +89,7 @@ def run(cmd: str) -> str:
     return p.stdout
 
 def upload(path: str) -> str:
+    ensure_bucket()
     key = f"{uuid.uuid4().hex}/{os.path.basename(path)}"
     s3.upload_file(path, BUCKET, key)
     url = s3.generate_presigned_url(
@@ -42,13 +100,19 @@ def upload(path: str) -> str:
         url = url.replace(f"{ep.scheme}://{ep.netloc}", PUBLIC_URL)
     return url
 
-# ====== Tasks ======
+# ====== Tareas ======
 @celery.task(bind=True)
 def convert_task(self, input_path: str, kind: str, target: str):
     tmpdir = tempfile.mkdtemp()
     try:
         base = os.path.splitext(os.path.basename(input_path))[0]
-        t = target.lower()
+        # Normaliza el formato de salida (quita espacios, pasa a minúsculas y resuelve alias)
+        t_raw = (target or "").strip().lower()
+        ALIASES = {
+            "jpeg": "jpg",
+            "tif":  "tiff",
+        }
+        t = ALIASES.get(t_raw, t_raw)
         out = os.path.join(tmpdir, f"{base}.{t}")
 
         if kind == "video":
@@ -78,31 +142,47 @@ def convert_task(self, input_path: str, kind: str, target: str):
             log = run(cmd)
 
         elif kind == "image":
-            if t in ("jpg", "jpeg"):
-                cmd_vips = f'vips copy "{input_path}" "{out}"[Q=82]'
-                IM = "magick" if shutil.which("magick") else "convert"
-                cmd_im = f'{IM} "{input_path}" -auto-orient -strip -quality 82 "{out}"'
-            elif t == "png":
-                cmd_vips = f'vips copy "{input_path}" "{out}"[compression=9]'
-                IM = "magick" if shutil.which("magick") else "convert"
-                cmd_im = f'{IM} "{input_path}" -auto-orient -strip -define png:compression-level=9 "{out}"'
-            elif t == "webp":
-                cmd_vips = f'vips copy "{input_path}" "{out}"[Q=82]'
-                IM = "magick" if shutil.which("magick") else "convert"
-                cmd_im = f'{IM} "{input_path}" -auto-orient -strip -quality 82 "{out}"'
-            elif t == "avif":
-                cmd_vips = f'vips copy "{input_path}" "{out}"[Q=60,effort=5]'
-                IM = "magick" if shutil.which("magick") else "convert"
-                cmd_im = f'{IM} "{input_path}" -auto-orient -strip -quality 60 "{out}"'
+            # Formatos que intentamos primero con VIPS por rendimiento
+            vips_ok = {"jpg", "jpeg", "png", "webp", "avif"}
+
+            if t in vips_ok:
+                IM = _im_bin()
+                if t in ("jpg", "jpeg"):
+                    cmd_vips = f'vips copy "{input_path}" "{out}"[Q=82]'
+                    cmd_im   = f'{IM} "{input_path}" -auto-orient -strip -colorspace sRGB -interlace Plane -quality 82 "{out}"'
+                elif t == "png":
+                    cmd_vips = f'vips copy "{input_path}" "{out}"[compression=9]'
+                    cmd_im   = f'{IM} "{input_path}" -auto-orient -strip -define png:compression-level=9 "{out}"'
+                elif t == "webp":
+                    cmd_vips = f'vips copy "{input_path}" "{out}"[Q=82]'
+                    cmd_im   = f'{IM} "{input_path}" -auto-orient -strip -define webp:method=6 -quality 82 "{out}"'
+                elif t == "avif":
+                    cmd_vips = f'vips copy "{input_path}" "{out}"[Q=60,effort=5]'
+                    cmd_im   = f'{IM} "{input_path}" -auto-orient -strip -define heic:speed=4 -quality 60 "{out}"'
+                else:
+                    raise ValueError("formato de imagen no soportado")
+
+                # VIPS primero; si falla, fallback a ImageMagick
+                try:
+                    log = run(cmd_vips)
+                except Exception as e_vips:
+                    try:
+                        log = f"[vips failed]\n{e_vips}\n\n[trying ImageMagick]\n" + run(cmd_im)
+                    except Exception as e_im:
+                        raise RuntimeError(f"Imagen: falló vips e ImageMagick:\n{e_vips}\n\n{e_im}")
+
+            # Resto de formatos (IM directo)
+            elif t in {"bmp", "tiff", "ico", "psd", "exr", "jp2", "heic", "heif", "gif"}:
+                convert_image_im(input_path, out, t)
+                log = f"ImageMagick -> {t}"
+
+            # SVG como salida no tiene sentido (vector real). Solo usar SVG como entrada.
+            elif t == "svg":
+                raise ValueError("SVG como salida no soportado (solo entrada).")
+
             else:
                 raise ValueError("formato de imagen no soportado")
-            try:
-                log = run(cmd_vips)
-            except Exception as e_vips:
-                try:
-                    log = f"[vips failed]\n{e_vips}\n\n[trying ImageMagick]\n" + run(cmd_im)
-                except Exception as e_im:
-                    raise RuntimeError(f"Imagen: falló vips e ImageMagick:\n{e_vips}\n\n{e_im}")
+
 
         elif kind == "mesh":
             assimp_map = {
@@ -111,7 +191,6 @@ def convert_task(self, input_path: str, kind: str, target: str):
                 "gltf":"gltf2","glb":"glb2",
             }
             if t == "3mf":
-                # Export fiable con FreeCAD headless (si está instalado)
                 fc_script = os.path.join(tmpdir, "export_3mf.py")
                 with open(fc_script, "w") as fcs:
                     fcs.write(f"""
@@ -146,6 +225,10 @@ print("OK")
         except Exception:
             pass
 
+# ====== Descargas evitando HLS (m3u8) ======
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+BASE_YTDLP = f'yt-dlp --no-playlist -N 4 -R 10 --retry-sleep 1 --user-agent "{UA}"'
+
 @celery.task(bind=True)
 def download_task(self, url: str, kind: str, quality: str):
     """
@@ -162,16 +245,21 @@ def download_task(self, url: str, kind: str, quality: str):
         out_tmpl = f'{tmpdir}/%(title).70s.%(ext)s'
 
         if kind == "video":
+            # Evitar HLS (m3u8) y preferir MP4/M4A
             if quality == "best":
-                fmt = 'bv*+ba/best'
+                fmt = 'bv*[protocol!=m3u8][ext=mp4]+ba[protocol!=m3u8][ext=m4a]/bv*[protocol!=m3u8]+ba/best'
             else:
-                # ej: "720p" -> 720
                 h = ''.join(ch for ch in quality if ch.isdigit()) or "720"
-                fmt = f'bestvideo[height<={h}]+bestaudio/best[height<={h}]'
-            cmd = f'yt-dlp -f "{fmt}" -o "{out_tmpl}" --no-playlist "{url}"'
+                fmt = f'bv*[height<={h}][protocol!=m3u8][ext=mp4]+ba[protocol!=m3u8][ext=m4a]/best[height<={h}]'
+            cmd = (
+                f'{BASE_YTDLP} -f "{fmt}" '
+                f'--merge-output-format mp4 '
+                f'-o "{out_tmpl}" "{url}"'
+            )
 
         elif kind == "audio":
-            # usamos extracción a mp3; --audio-quality usa escala VBR 0(mejor)-9
+            # Preferir M4A y evitar HLS; exportar MP3 con calidad solicitada
+            fmt = 'ba[protocol!=m3u8][ext=m4a]/bestaudio'
             if quality == "best":
                 aq = "0"; ppa = ""
             elif quality == "256k":
@@ -181,8 +269,8 @@ def download_task(self, url: str, kind: str, quality: str):
             else:
                 aq = "0"; ppa = ""
             cmd = (
-                f'yt-dlp -f "bestaudio/best" -x --audio-format mp3 --audio-quality {aq} '
-                f'{ppa} -o "{out_tmpl}" --no-playlist "{url}"'
+                f'{BASE_YTDLP} -f "{fmt}" -x --audio-format mp3 --audio-quality {aq} '
+                f'{ppa} -o "{out_tmpl}" "{url}"'
             )
 
         else:

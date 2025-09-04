@@ -98,3 +98,8 @@ To facilitate stack management without having to remember long Docker Compose co
 ```bash Clone the repository: ```bash
 git clone https://gitlab.mtknowledge.com/software/mcd.git
 cd mcd
+
+## 🔃 Restart
+!!⚠️WARNING!!
+The program contains the script "start_BASE.sh," which will delete all current containers and volumes. This script is more for freeing up space than for starting.
+If you want to bring the container back up without losing anything, we recommend using "start.sh".

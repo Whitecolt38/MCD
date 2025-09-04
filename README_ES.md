@@ -46,3 +46,8 @@ Para facilitar la gestión del stack sin recordar comandos largos de Docker Comp
    ```bash
    git clone https://gitlab.mtknowledge.com/software/mcd.git
    cd mcd
+
+## 🔃Reinicio
+!!⚠️ADVERTENCIA!!
+El programa contiene el script "start_BASE.sh" esto borrará todos los containers y volumenes actuales, este script es mas para liberar espacio que para iniciar
+En caso de querer volver a levantar el container sin perder nada recomendamos "start.sh"
