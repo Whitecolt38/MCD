@@ -66,8 +66,7 @@ This script is more for freeing up space than for starting.
 If you want to bring the container back up without losing anything, we recommend using `start.sh`.
 
 ---
-
-# ------------------------------------------- Spanish -------------------------------------------
+# ---------------------- Spanish  ----------------------
 
 # MCD - Media Convert & Download
 
