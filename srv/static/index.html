@@ -14,7 +14,9 @@
     <header class="text-center space-y-4">
       <img src="/static/MT_logo.png" alt="Multimedia Knowledge S.L" class="w-40 mx-auto" />
       <h1 class="text-3xl md:text-4xl font-extrabold">MCD</h1>
-      <p class="opacity-70"><p>Media Converter & Downloader </p> Herramientas de conversión y descarga de medios</p>
+      <p class="opacity-70">
+        <span>Media Converter & Downloader</span> — Herramientas de conversión y descarga de medios
+      </p>
     </header>
 
     <!-- =============== MENÚ PRINCIPAL =============== -->
@@ -29,16 +31,47 @@
         <div class="card-body gap-3">
           <div class="flex items-start justify-between">
             <h2 class="card-title">Convertidor de archivos</h2>
-            <button class="btn btn-ghost btn-sm" onclick="backToMenu()">Volver al menú</button>
           </div>
 
-          <p class="text-sm opacity-70">1) Selecciona un archivo · 2) Elige formato destino</p>
+          <p class="text-sm opacity-70">1) Selecciona un archivo o una carpeta · 2) Elige formato destino</p>
 
-          <div class="flex items-center gap-3">
-            <input id="file" type="file" class="file-input file-input-bordered" />
-            <span id="fileBadge" class="badge badge-outline hidden"></span>
+          <!-- selector archivo/carpeta -->
+          <div class="flex flex-col gap-3">
+            <label class="label cursor-pointer w-fit">
+              <span class="label-text mr-3">Subir carpeta</span>
+              <input id="toggleDir" type="checkbox" class="toggle toggle-primary" />
+            </label>
+
+            <!-- archivo(s) sueltos -->
+            <div class="flex items-center gap-3" id="singleWrap">
+              <input id="file" type="file" class="file-input file-input-bordered" />
+              <span id="fileBadge" class="badge badge-outline hidden"></span>
+            </div>
+
+        <!-- carpeta completa -->
+        <div class="flex flex-col gap-3 hidden" id="dirWrap">
+          <input id="dirInput" type="file" class="file-input file-input-bordered" webkitdirectory multiple />
+          <div id="folderInfo" class="text-xs opacity-70"></div>
+
+          <div id="folderTargets" class="flex items-center gap-3 hidden">
+            <select id="folderTarget" class="select select-bordered"></select>
+            <button id="btnConvertFolder" type="button" class="btn btn-primary">Convertir carpeta</button>
           </div>
 
+          <pre id="batchLog" class="mt-1 text-xs opacity-70"></pre>
+          <progress id="batchProg" class="progress w-full hidden" value="0" max="100"></progress>
+
+          <!-- 👇 NUEVO contenedor para enlaces de descarga individuales -->
+          <div id="batchLinks" class="mt-2 space-y-1"></div>
+        </div>
+
+
+              <pre id="batchLog" class="mt-1 text-xs opacity-70"></pre>
+              <progress id="batchProg" class="progress w-full hidden" value="0" max="100"></progress>
+            </div>
+          </div>
+
+          <!-- objetivos para archivo suelto -->
           <div id="options" class="hidden">
             <div class="divider my-2">Convertir a</div>
             <div id="targets" class="flex flex-wrap gap-2"></div>
@@ -61,7 +94,6 @@
         <div class="card-body gap-3">
           <div class="flex items-start justify-between">
             <h2 class="card-title">Descargar desde URL (YouTube, Instagram, Facebook, X…)</h2>
-            <button class="btn btn-ghost btn-sm" onclick="backToMenu()">Volver al menú</button>
           </div>
 
           <div class="flex flex-col md:flex-row gap-3">
@@ -85,188 +117,22 @@
         </div>
       </div>
     </section>
-    <!-- =============== Promoción web=============== -->
+
+    <!-- =============== Promoción web =============== -->
     <section>
-      <div style="text-align: center;">
+      <div class="text-center">
         <h1 class="opacity-70">
-          Visitanos en nuestra pagina web
-          <a href="https://www.mtknowledge.com" style="text-decoration:wavy;">www.mtknowledge.com</a>
+          Visítanos en nuestra página web
+          <a href="https://www.mtknowledge.com" class="link">www.mtknowledge.com</a>
         </h1>
       </div>
-</section>
+    </section>
   </div>
 
-  <!-- utilidades -->
+  <!-- librería para empaquetar ZIP -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <!-- JS principal -->
   <script src="/static/app.js"></script>
-
-  <!-- lógica principal -->
-  <script>
-    // ======= Navegación entre vistas =======
-    function showSection(which) {
-      document.getElementById('menu').classList.add('hidden');
-      document.getElementById('convertSection').classList.add('hidden');
-      document.getElementById('downloaderSection').classList.add('hidden');
-
-      if (which === 'convert') {
-        document.getElementById('convertSection').classList.remove('hidden');
-      }
-      if (which === 'downloader') {
-        document.getElementById('downloaderSection').classList.remove('hidden');
-        if (typeof window.fillQuality === 'function') window.fillQuality();
-        const url = document.getElementById('urlInput'); if (url) url.focus();
-      }
-
-      if (typeof window.resetForms === 'function') window.resetForms();
-    }
-
-    function backToMenu() {
-      if (typeof window.resetForms === 'function') window.resetForms();
-      document.getElementById('convertSection').classList.add('hidden');
-      document.getElementById('downloaderSection').classList.add('hidden');
-      document.getElementById('menu').classList.remove('hidden');
-    }
-
-    // ---------- catálogos para convertidor ----------
-    const MAP = {
-      image: {
-        exts: ["jpg","jpeg","png","webp","gif","bmp","tif","tiff","heic","heif","ico","svg","avif","psd","exr","jp2","jfi","jif","jfif","jpe"],
-        targets: ["jpg","png","webp","avif","gif","bmp","tiff","ico","svg","heic","heif","psd","exr","jp2"]
-      },
-      video: {
-        exts: ["mp4","mov","mkv","avi","webm","m4v","mpeg","mpg","ts","3gp","3g2","ogv","flv"],
-        targets: ["mp4","webm","mkv","mov","avi","m4v","mpeg","mpg","ts","3gp","3g2","ogv","flv","gif"]
-      },
-      mesh: {
-        exts: ["stl","obj","glb","gltf","fbx","ply","3ds","dae","off","x","3mf","plyb"],
-        targets: ["glb","gltf","obj","stl","ply","plyb","fbx","3mf","3ds","dae","x","off"]
-      }
-    };
-
-    const $ = s => document.querySelector(s);
-    const fileInput = $("#file"), fileBadge=$("#fileBadge"),
-          optionsBox=$("#options"), targetsBox=$("#targets"),
-          prog=$("#prog"), status=$("#status"), download=$("#download");
-
-    function renderSelect(kind, list){
-      targetsBox.innerHTML="";
-      const wrap=document.createElement("div");
-      wrap.className="flex flex-wrap items-center gap-3";
-      const sel=document.createElement("select");
-      sel.className="select select-bordered"; sel.id=`${kind}Target`;
-      list.forEach(fmt=>{
-        const o=document.createElement("option"); o.value=fmt; o.textContent=fmt.toUpperCase(); sel.appendChild(o);
-      });
-      const btn=document.createElement("button");
-      btn.type="button";
-      btn.className="btn btn-primary";
-      btn.textContent="Convertir";
-      btn.onclick=()=>startConvert(kind, sel.value);
-      wrap.appendChild(sel); wrap.appendChild(btn);
-      targetsBox.appendChild(wrap);
-      optionsBox.classList.remove("hidden");
-    }
-
-    const getExt = n => n.includes(".") ? n.split(".").pop().toLowerCase() : "";
-    function detectKindByExt(ext){
-      for (const k of Object.keys(MAP)) if (MAP[k].exts.includes(ext)) return k;
-      return null;
-    }
-
-    window.startConvert = async function startConvert(kind, target){
-      const f=fileInput.files[0]; if(!f) return alert("Selecciona un archivo primero");
-      prog.classList.remove("hidden"); status.textContent="Subiendo archivo…"; download.innerHTML="";
-      const fd=new FormData(); fd.append("file",f); fd.append("kind",kind); fd.append("target",target);
-      try{
-        const r=await fetch("/convert",{method:"POST",body:fd}); const {task_id}=await r.json();
-        status.textContent="Procesando…";
-        const poll=setInterval(async()=>{
-          const s=await fetch("/status/"+task_id).then(x=>x.json());
-          status.textContent="Estado: "+s.state;
-          if(s.state==="SUCCESS"){
-            clearInterval(poll); prog.classList.add("hidden");
-            const url=s.result?.download_url;
-            download.innerHTML = url
-              ? `<a class="btn btn-success" target="_blank" href="${url}">Descargar archivo</a>`
-              : "Terminado sin URL.";
-            // (NO limpiar aquí)
-          }
-          if(s.state==="FAILURE"){
-            clearInterval(poll); prog.classList.add("hidden");
-            status.textContent="Error: "+(s.info||"Fallo");
-          }
-        },1500);
-      }catch(e){
-        prog.classList.add("hidden"); status.textContent="Error: "+e.message;
-      }
-    }
-
-    fileInput.addEventListener("change", ()=>{
-      status.textContent=""; download.innerHTML=""; prog.classList.add("hidden"); targetsBox.innerHTML="";
-      const f=fileInput.files[0]; if(!f){ fileBadge.classList.add("hidden"); return; }
-      const ext=getExt(f.name); const kind=detectKindByExt(ext);
-      if(!kind){
-        fileBadge.textContent=`Tipo no soportado: .${ext}`;
-        fileBadge.classList.remove("hidden");
-        optionsBox.classList.add("hidden");
-        return;
-      }
-      fileBadge.textContent=`Detectado: ${kind.toUpperCase()} (.${ext})`;
-      fileBadge.classList.remove("hidden");
-      renderSelect(kind, MAP[kind].targets);
-    });
-
-    // ---------- Descarga por URL ----------
-    const urlInput=$("#urlInput"), dlKind=$("#dlKind"), dlQuality=$("#dlQuality"),
-          prog2=$("#prog2"), status2=$("#status2"), download2=$("#download2");
-
-    window.fillQuality = function fillQuality(){
-      download2.innerHTML=""; status2.textContent="";
-      dlQuality.innerHTML="";
-      if(dlKind.value==="video"){
-        ["best","1080p","720p","480p","360p"].forEach(q=>{
-          const o=document.createElement("option"); o.value=q; o.textContent=q; dlQuality.appendChild(o);
-        });
-      }else{
-        [{v:"best",t:"best"},{v:"256k",t:"256 kbps"},{v:"128k",t:"128 kbps"}].forEach(({v,t})=>{
-          const o=document.createElement("option"); o.value=v; o.textContent=t; dlQuality.appendChild(o);
-        });
-      }
-    }
-    dlKind.addEventListener("change", window.fillQuality);
-
-    window.startFetch = async function startFetch(){
-      const url=urlInput.value.trim(); if(!url) return alert("Pega una URL");
-      const kind=dlKind.value, quality=dlQuality.value;
-      prog2.classList.remove("hidden"); status2.textContent="Iniciando descarga…"; download2.innerHTML="";
-      const fd=new FormData(); fd.append("url",url); fd.append("kind",kind); fd.append("quality",quality);
-      try{
-        const r=await fetch("/fetch",{method:"POST",body:fd}); const {task_id}=await r.json();
-        status2.textContent="Descargando…";
-        const poll=setInterval(async()=>{
-          const s=await fetch("/status/"+task_id).then(x=>x.json());
-          status2.textContent="Estado: "+s.state;
-          if(s.state==="SUCCESS"){
-            clearInterval(poll); prog2.classList.add("hidden");
-            const u=s.result?.download_url;
-            download2.innerHTML = u
-              ? `<a class="btn btn-success" target="_blank" href="${u}">Abrir/Descargar</a>`
-              : "Terminado sin URL.";
-            // (NO limpiar aquí)
-          }
-          if(s.state==="FAILURE"){
-            clearInterval(poll); prog2.classList.add("hidden");
-            status2.textContent="Error: "+(s.info||"Fallo");
-          }
-        },1500);
-      }catch(e){
-        prog2.classList.add("hidden"); status2.textContent="Error: "+e.message;
-      }
-    }
-
-    // Inicializa (por si entras directo a Downloader)
-    document.addEventListener('DOMContentLoaded', () => {
-      if (typeof window.fillQuality === 'function') window.fillQuality();
-    });
-  </script>
 </body>
 </html>

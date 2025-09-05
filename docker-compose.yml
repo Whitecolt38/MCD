@@ -1,8 +1,12 @@
-version: "3.9"
 services:
   redis:
     image: redis:7
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   minio:
     image: minio/minio:latest
@@ -10,9 +14,18 @@ services:
     environment:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: minio12345
-    ports: ["9000:9000","9001:9001"]
-    volumes: [ "minio-data:/data" ]
+      TZ: Europe/Madrid
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   api:
     build: ./srv
@@ -24,12 +37,18 @@ services:
       MINIO_SECRET_KEY: minio12345
       MINIO_BUCKET: jobs
       SHARED_DIR: /shared
-      MINIO_PUBLIC_URL: http://192.168.29.131:9000   # 👈 URL pública para descargas
+      MINIO_PUBLIC_URL: http://192.168.29.131:9000
+      TZ: Europe/Madrid
     volumes:
       - ./srv:/app
       - shared-tmp:/shared
-    depends_on: [ redis, minio ]
-    ports: ["8000:8000"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
     restart: unless-stopped
 
   worker:
@@ -42,11 +61,18 @@ services:
       MINIO_SECRET_KEY: minio12345
       MINIO_BUCKET: jobs
       SHARED_DIR: /shared
-      MINIO_PUBLIC_URL: http://192.168.29.131:9000   # 👈 igual aquí
+      MINIO_PUBLIC_URL: http://192.168.29.131:9000
+      TZ: Europe/Madrid
     volumes:
       - ./srv:/app
       - shared-tmp:/shared
-    depends_on: [ api, redis, minio ]
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

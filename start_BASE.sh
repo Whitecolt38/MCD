@@ -20,7 +20,7 @@ fi
 echo "" # Salto de línea para claridad
 echo "⚠️  Esta es la segunda y última confirmación. La acción es irreversible."
 echo "⚠️  This is the second and final confirmation. This action is irreversible."
-read -p "¿Estás absolutamente seguro? Escribe 'borrar' para continuar: " confirm2
+read -p "¿Estás absolutamente seguro? Escribe 'erease' para continuar: " confirm2
 
 # --- Segunda confirmación ---
 
