@@ -53,6 +53,8 @@ To facilitate stack management without having to remember long Docker Compose co
 ```bash
 git clone https://gitlab.mtknowledge.com/software/mcd.git
 cd mcd
+chmod +x ./start.sh
+./start.sh
 ```
 
 ---
@@ -121,6 +123,8 @@ Para facilitar la gestión del stack sin recordar comandos largos de Docker Comp
 ```bash
 git clone https://gitlab.mtknowledge.com/software/mcd.git
 cd mcd
+chmod +x ./start.sh
+./start.sh
 ```
 
 ---
