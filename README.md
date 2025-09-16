@@ -1,5 +1,6 @@
 # ---------------------- English  ----------------------
-
+# NOTE
+Your machine’s IP address must be 192.168.29.131 for the app to work with this exact configuration. If you want to change the IP, modify the MINIO_PUBLIC_URL line in the docker-compose.yml file.
 # MCD - Media Convert & Download
 
 This project is a **multimedia file converter and downloader** (images, videos, 3D models, etc.), packaged with **Docker Compose**.  
@@ -53,8 +54,6 @@ To facilitate stack management without having to remember long Docker Compose co
 ```bash
 git clone https://gitlab.mtknowledge.com/software/mcd.git
 cd mcd
-chmod +x ./start.sh
-./start.sh
 ```
 
 ---
@@ -69,6 +68,8 @@ If you want to bring the container back up without losing anything, we recommend
 
 ---
 # ---------------------- Spanish  ----------------------
+# NOTA
+La dirección IP de tu máquina debe ser 192.168.29.131 para que la aplicación funcione con esta configuración exacta. Si desea cambiar la IP, modifique la línea MINIO_PUBLIC_URL en el archivo docker-compose.yml.
 
 # MCD - Media Convert & Download
 
@@ -123,8 +124,6 @@ Para facilitar la gestión del stack sin recordar comandos largos de Docker Comp
 ```bash
 git clone https://gitlab.mtknowledge.com/software/mcd.git
 cd mcd
-chmod +x ./start.sh
-./start.sh
 ```
 
 ---
