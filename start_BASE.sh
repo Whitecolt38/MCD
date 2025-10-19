@@ -1,49 +1,64 @@
 #!/bin/bash
+# Script para iniciar la app MCD desde cero, seguro y controlado
 
-# --- Mensajes de confirmación ---
+cd "$(dirname "$0")" || exit 1
 
-echo "⚠️  ATENCIÓN: Este script va a borrar contenedores, imágenes y volúmenes antiguos de Docker."
-echo "⚠️  WARNING: This script will delete old Docker containers, images, and volumes."
-echo "Esto liberará espacio pero eliminará datos persistentes anteriores."
-echo "This will free up space but will remove previous persistent data."
+# --- 1. CONFIGURACIÓN Y CHEQUEO DE SEGURIDAD ---
+PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
 
-read -p "¿Quieres continuar? (s/N) / Do you want to continue? (y/N): " confirm1
+TMP_PROJ_IDS=$(mktemp)
+TMP_ALL_RUNNING_IDS=$(mktemp)
 
-# --- Primera confirmación ---
+# Contenedores del proyecto
+docker ps --filter "name=${PROJECT_NAME}-" -q | sed '/^$/d' > "$TMP_PROJ_IDS"
+# Todos los contenedores en ejecución
+docker ps -q | sed '/^$/d' > "$TMP_ALL_RUNNING_IDS"
 
-if [[ "$confirm1" != "s" && "$confirm1" != "S" && "$confirm1" != "y" && "$confirm1" != "Y" ]]; then
-  echo "❌ Cancelado por el usuario."
-  echo "❌ Canceled by user."
-  exit 1
+# Detectar contenedores ajenos
+ALIEN_CONTAINER_IDS=$(grep -v -f "$TMP_PROJ_IDS" -x "$TMP_ALL_RUNNING_IDS")
+
+trap "rm -f $TMP_PROJ_IDS $TMP_ALL_RUNNING_IDS" EXIT
+
+if [[ -n "$ALIEN_CONTAINER_IDS" ]]; then
+    CLEAN_ALIEN_IDS=$(echo "$ALIEN_CONTAINER_IDS" | sed '/^$/d')
+    ALIEN_CONTAINER_COUNT=$(echo "$CLEAN_ALIEN_IDS" | wc -l)
+
+    if [[ "$ALIEN_CONTAINER_COUNT" -gt 0 ]]; then
+        # Obtener nombres de contenedores ajenos correctamente
+        ALIEN_CONTAINER_NAMES=$(echo "$CLEAN_ALIEN_IDS" | xargs -r -n1 docker inspect --format '{{.Name}}' | sed 's/^\/\|$/ /g')
+        echo "🚨 ERROR DE SEGURIDAD: ¡Contenedores ajenos detectados!"
+        echo "El script ha sido CANCELADO para evitar daños."
+        echo "Contenedores ajenos detectados ($ALIEN_CONTAINER_COUNT):"
+        echo "$ALIEN_CONTAINER_NAMES"
+        exit 1
+    fi
 fi
 
-echo "" # Salto de línea para claridad
-echo "⚠️  Esta es la segunda y última confirmación. La acción es irreversible."
-echo "⚠️  This is the second and final confirmation. This action is irreversible."
-read -p "¿Estás absolutamente seguro? Escribe 'erease' para continuar: " confirm2
-
-# --- Segunda confirmación ---
-
-if [[ "$confirm2" != "erease" ]]; then
-  echo "❌ Cancelado por el usuario."
-  echo "❌ Canceled by user."
-  exit 1
+# --- 2. CONFIRMACIÓN DEL USUARIO ---
+PROJECT_CONTAINERS=$(docker ps --filter "name=${PROJECT_NAME}-" --format "{{.Names}}")
+if [[ -n "$PROJECT_CONTAINERS" ]]; then
+    echo "Contenedores del proyecto detectados:"
+    echo "$PROJECT_CONTAINERS"
+    echo ""
+    read -p "⚠️  Se van a eliminar y recrear TODOS los contenedores del proyecto desde cero. ¿Desea continuar? (s/n) " CONFIRM
+    if [[ "$CONFIRM" != "s" && "$CONFIRM" != "S" ]]; then
+        echo "Operación cancelada por el usuario."
+        exit 0
+    fi
 fi
 
+# --- 3. ELIMINAR CONTENEDORES DEL PROYECTO ---
+PROJECT_IDS=$(docker ps -a --filter "name=${PROJECT_NAME}-" -q)
+if [[ -n "$PROJECT_IDS" ]]; then
+    echo ">>> Deteniendo contenedores del proyecto..."
+    docker stop $PROJECT_IDS > /dev/null 2>&1
+    echo ">>> Eliminando contenedores del proyecto..."
+    docker rm $PROJECT_IDS > /dev/null 2>&1
+fi
 
-echo "🛑 Deteniendo y eliminando contenedores, redes y volúmenes antiguos..."
-docker compose down -v
-
-echo "🧹 Eliminando imágenes antiguas no usadas..."
-docker image prune -a -f
-
-echo "🧽 Limpiando cachés, redes y volúmenes huérfanos..."
-docker system prune -f --volumes
-
-echo "🔨 Construyendo imágenes desde cero..."
-docker compose build --no-cache
-
-echo "🚀 Levantando servicios en segundo plano..."
+# --- 4. LEVANTAR EL STACK DESDE CERO ---
+echo ">>> Levantando contenedores de MCD desde cero..."
 docker compose up -d
 
-echo "✅ Todo listo. Usa 'docker compose ps' para ver el estado de los contenedores."
+echo ">>> Contenedores en ejecución:"
+docker compose ps

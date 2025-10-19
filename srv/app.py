@@ -1,5 +1,9 @@
 # srv/app.py
 import os, uuid
+import io
+import boto3
+from botocore.exceptions import ClientError
+from fastapi.responses import StreamingResponse
 from typing import List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
@@ -8,8 +12,20 @@ from worker import convert_task, download_task
 
 app = FastAPI(title="Media Convert & Fetch")
 
-SHARED_DIR = os.getenv("SHARED_DIR", "/shared")  # volumen compartido entre api y worker
+SHARED_DIR = os.getenv("SHARED_DIR", "/shared") # volumen compartido entre api y worker
 
+# Cliente interno de MinIO (solo para la API)
+MINIO_URL  = os.getenv("MINIO_URL", "http://minio:9000")
+MINIO_KEY  = os.getenv("MINIO_ACCESS_KEY", "minio")
+MINIO_SEC  = os.getenv("MINIO_SECRET_KEY", "minio12345")
+BUCKET     = os.getenv("MINIO_BUCKET", "jobs")
+
+s3_client = boto3.client(
+    "s3",
+    endpoint_url=MINIO_URL,
+    aws_access_key_id=MINIO_KEY,
+    aws_secret_access_key=MINIO_SEC
+)
 # --- catálogos para clasificar por extensión (mismo criterio que frontend) ---
 IMG_EXT = {"jpg","jpeg","png","webp","avif","bmp","tif","tiff","ico","psd","exr","jp2","heic","heif","gif","svg"}
 VID_EXT = {"mp4","webm","mkv","mov","avi","m4v","mpeg","mpg","ts","3gp","3g2","ogv","flv"}
@@ -37,14 +53,14 @@ async def convert(file: UploadFile = File(...),
     with open(inpath, "wb") as f:
         f.write(await file.read())
 
-    task = convert_task.delay(inpath, kind, target)  # ruta absoluta en /shared
+    task = convert_task.delay(inpath, kind, target) # ruta absoluta en /shared
     return {"task_id": task.id}
 
 @app.post("/api/convert/batch")
 async def convert_batch(
     files: List[UploadFile] = File(...),
-    kind: str = Form(...),    # "image" | "video" | "audio"
-    target: str = Form(...),  # extensión destino (jpg, mp4, etc.)
+    kind: str = Form(...),  # "image" | "video" | "audio"
+    target: str = Form(...), # extensión destino (jpg, mp4, etc.)
 ):
     if not files:
         raise HTTPException(status_code=400, detail="No se recibió ningún archivo")
@@ -86,7 +102,18 @@ def status(task_id: str):
     from worker import celery
     a = celery.AsyncResult(task_id)
     if a.successful():
+        # *** CORRECCIÓN DE SEGURIDAD AQUÍ ***
+        # El worker ahora devuelve 'file_key' en lugar de 'download_url'
+        if "file_key" in a.result:
+            # Construimos la URL de descarga segura usando el endpoint de la API
+            file_key = a.result["file_key"]
+            download_url = f"/api/download/{file_key}"
+            # Devolvemos el resultado con la URL segura y la clave (opcional)
+            return JSONResponse({"state": a.state, "result": {"download_url": download_url, "file_key": file_key}})
+        
+        # Caso por si el worker devuelve otro tipo de resultado (o el antiguo)
         return JSONResponse({"state": a.state, "result": a.result})
+        
     return {"state": a.state, "info": str(a.info)}
 
 # estáticos y raíz
@@ -95,3 +122,24 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/")
 async def root():
     return FileResponse("static/index.html")
+
+# ====================== NUEVO ENDPOINT DE DESCARGA ======================
+
+@app.get("/api/download/{key:path}")
+async def download_file(key: str):
+    """
+    Descarga archivos desde MinIO vía API sin exponer la URL interna.
+    key: la ruta relativa que devuelve la función 'upload' en worker.py
+    """
+    try:
+        file_obj = io.BytesIO()
+        s3_client.download_fileobj(BUCKET, key, file_obj)
+        file_obj.seek(0)
+        filename = key.split("/")[-1]
+        return StreamingResponse(
+            file_obj,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ClientError:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")

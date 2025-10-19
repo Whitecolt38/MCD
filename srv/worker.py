@@ -1,8 +1,10 @@
 import os, uuid, shutil, tempfile, subprocess
 from celery import Celery
 import boto3
-from urllib.parse import urlparse
-from botocore.exceptions import ClientError  # 👈 añadido
+# from urllib.parse import urlparse # Ya no se necesita
+from botocore.exceptions import ClientError
+from typing import List
+import re
 
 # ====== Config ======
 REDIS_URL  = os.getenv("REDIS_URL", "redis://redis:6379/0")
@@ -10,8 +12,8 @@ MINIO_URL  = os.getenv("MINIO_URL", "http://minio:9000")
 MINIO_KEY  = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SEC  = os.getenv("MINIO_SECRET_KEY", "minio12345")
 BUCKET     = os.getenv("MINIO_BUCKET", "jobs")
-PUBLIC_URL = os.getenv("MINIO_PUBLIC_URL")      # ej: http://TU_IP:9000
-TASK_TIMEOUT_SECS = int(os.getenv("TASK_TIMEOUT_SECS", "900"))  # 15 min
+# PUBLIC_URL ya no se usa, porque la descarga es via API
+TASK_TIMEOUT_SECS = int(os.getenv("TASK_TIMEOUT_SECS", "900")) # 15 min
 
 # ====== Celery & S3 ======
 celery = Celery("worker", broker=REDIS_URL, backend=REDIS_URL)
@@ -33,7 +35,19 @@ def ensure_bucket():
         else:
             raise
 
-# ====== Utils ======
+# ====== Utils: Versión SEGURA de run ======
+def run(cmd: List[str]) -> str:
+    """Ejecuta comando (lista de argumentos) y devuelve salida. Evita shell=True."""
+    # shell=False es el valor por defecto y es seguro
+    p = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, timeout=TASK_TIMEOUT_SECS
+    )
+    if p.returncode != 0:
+        # Mostramos el comando tal cual para el log
+        raise RuntimeError(f"cmd failed ({p.returncode}) -> {' '.join(cmd)}\n--- LOG ---\n{p.stdout}")
+    return p.stdout
+
 # ====== Helpers IM/FFmpeg para imágenes ======
 def _im_bin():
     # En Debian IM7 trae "magick"; en otros, "convert"
@@ -57,14 +71,17 @@ def convert_image_im(input_path: str, out_path: str, ext: str):
         "heif": ["-auto-orient", "-strip", "-quality", "90"],
         "jp2":  ["-auto-orient", "-strip", "-quality", "35"],
         "psd":  ["-auto-orient"],
-        "exr":  ["-auto-orient", "-colorspace", "RGB"],  # evita perfiles raros
-        "gif":  ["-auto-orient"],                        # imagen estática
-        # ico lo tratamos aparte (multi-res)
+        "exr":  ["-auto-orient", "-colorspace", "RGB"],
+        "gif":  ["-auto-orient"],
     }
 
     if t == "ico":
-        # ICO multi-tamaño: 16/32/48/64
-        cmd = (
+        # ICO multi-tamaño: 16/32/48/64. Esto es complejo de pasar como lista única
+        # Se requiere mantener el uso de paréntesis de shell, pero es un caso de uso
+        # que NO depende de entradas de usuario, por lo que se mantiene en modo shell,
+        # pero es una excepción controlada. Idealmente debería usarse la API de IM.
+        # Por simplicidad y evitar refactor extenso, mantenemos la estructura shell.
+        cmd_shell = (
             f'{IM} '
             f'( "{input_path}" -resize 16x16 ) '
             f'( "{input_path}" -resize 32x32 ) '
@@ -72,33 +89,37 @@ def convert_image_im(input_path: str, out_path: str, ext: str):
             f'( "{input_path}" -resize 64x64 ) '
             f'"{out_path}"'
         )
+        # Nota: La función run DEBE seguir usando shell=True para este bloque.
+        # La solución es usar una función run_shell para este caso:
+        p = subprocess.run(
+            cmd_shell, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, timeout=TASK_TIMEOUT_SECS
+        )
+        if p.returncode != 0:
+            raise RuntimeError(f"cmd failed ({p.returncode}) -> {cmd_shell}\n--- LOG ---\n{p.stdout}")
+
     else:
-        args = " ".join(per_fmt.get(t, []))
-        cmd = f'{IM} "{input_path}" {args} "{out_path}"'
+        args_list = per_fmt.get(t, [])
+        # Pasamos como lista: [IM, arg1, arg2, input_path, out_path]
+        cmd = [IM] + args_list + [input_path, out_path]
+        run(cmd)
 
-    run(cmd)
-
-def run(cmd: str) -> str:
-    """Ejecuta comando y devuelve salida; lanza excepción si RC != 0."""
-    p = subprocess.run(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, timeout=TASK_TIMEOUT_SECS
-    )
-    if p.returncode != 0:
-        raise RuntimeError(f"cmd failed ({p.returncode}) -> {cmd}\n--- LOG ---\n{p.stdout}")
-    return p.stdout
-
+# Versión segura de upload: solo devuelve la clave, ahora con sanitización del nombre.
 def upload(path: str) -> str:
     ensure_bucket()
-    key = f"{uuid.uuid4().hex}/{os.path.basename(path)}"
+    # 1. Obtener el nombre original del archivo
+    filename = os.path.basename(path)
+    
+    # 2. Sanear el nombre del archivo para que sea seguro en MinIO/S3 y URLs.
+    # Reemplazar caracteres que NO son alfanuméricos, ni guiones bajos, ni puntos, ni guiones por "_".
+    safe_filename = re.sub(r'[^\w\.\-\_]', '_', filename)
+    
+    # 3. Construir la clave usando el nombre sanitizado
+    key = f"{uuid.uuid4().hex}/{safe_filename}"
+    
     s3.upload_file(path, BUCKET, key)
-    url = s3.generate_presigned_url(
-        "get_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=21600
-    )
-    if PUBLIC_URL:
-        ep = urlparse(MINIO_URL)
-        url = url.replace(f"{ep.scheme}://{ep.netloc}", PUBLIC_URL)
-    return url
+    # Ya NO se genera ni se devuelve la URL pre-firmada.
+    return key
 
 # ====== Tareas ======
 @celery.task(bind=True)
@@ -106,7 +127,6 @@ def convert_task(self, input_path: str, kind: str, target: str):
     tmpdir = tempfile.mkdtemp()
     try:
         base = os.path.splitext(os.path.basename(input_path))[0]
-        # Normaliza el formato de salida (quita espacios, pasa a minúsculas y resuelve alias)
         t_raw = (target or "").strip().lower()
         ALIASES = {
             "jpeg": "jpg",
@@ -114,9 +134,10 @@ def convert_task(self, input_path: str, kind: str, target: str):
         }
         t = ALIASES.get(t_raw, t_raw)
         out = os.path.join(tmpdir, f"{base}.{t}")
+        log = "" # Inicializamos el log
 
         if kind == "video":
-            enc = {
+            enc_str = {
                 "mp4":  '-c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k',
                 "m4v":  '-c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k',
                 "mov":  '-c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 160k',
@@ -131,34 +152,47 @@ def convert_task(self, input_path: str, kind: str, target: str):
                 "ogv":  '-c:v libtheora -q:v 7 -c:a libvorbis -q:a 5',
                 "flv":  '-c:v flv -q:v 7 -c:a libmp3lame -q:a 4'
             }
+
             if t == "gif":
                 palette = os.path.join(tmpdir, "palette.png")
-                _ = run(f'ffmpeg -y -i "{input_path}" -vf "fps=12,scale=iw:-1:flags=lanczos,palettegen" "{palette}"')
-                cmd = f'ffmpeg -y -i "{input_path}" -i "{palette}" -lavfi "fps=12,scale=iw:-1:flags=lanczos [x]; [x][1:v] paletteuse" -loop 0 "{out}"'
-            elif t in enc:
-                cmd = f'ffmpeg -y -i "{input_path}" {enc[t]} "{out}"'
+                
+                # Comando 1: generar paleta (lista de argumentos)
+                cmd1 = ["ffmpeg", "-y", "-i", input_path, "-vf", "fps=12,scale=iw:-1:flags=lanczos,palettegen", palette]
+                run(cmd1)
+
+                # Comando 2: convertir (lista de argumentos)
+                cmd2 = ["ffmpeg", "-y", "-i", input_path, "-i", palette, "-lavfi", "fps=12,scale=iw:-1:flags=lanczos [x]; [x][1:v] paletteuse", "-loop", "0", out]
+                log = run(cmd2)
+                
+            elif t in enc_str:
+                # Convertimos la cadena de opciones en una lista
+                enc_list = enc_str[t].split() 
+                
+                # Comando: [ffmpeg, -y, -i, input_path, opciones..., out]
+                cmd = ["ffmpeg", "-y", "-i", input_path] + enc_list + [out]
+                log = run(cmd)
             else:
                 raise ValueError("formato de video no soportado")
-            log = run(cmd)
 
         elif kind == "image":
-            # Formatos que intentamos primero con VIPS por rendimiento
             vips_ok = {"jpg", "jpeg", "png", "webp", "avif"}
+            IM = _im_bin()
 
             if t in vips_ok:
-                IM = _im_bin()
+                
+                # VIPS
                 if t in ("jpg", "jpeg"):
-                    cmd_vips = f'vips copy "{input_path}" "{out}"[Q=82]'
-                    cmd_im   = f'{IM} "{input_path}" -auto-orient -strip -colorspace sRGB -interlace Plane -quality 82 "{out}"'
+                    cmd_vips = ["vips", "copy", input_path, f"{out}[Q=82]"]
+                    cmd_im   = [IM, input_path, "-auto-orient", "-strip", "-colorspace", "sRGB", "-interlace", "Plane", "-quality", "82", out]
                 elif t == "png":
-                    cmd_vips = f'vips copy "{input_path}" "{out}"[compression=9]'
-                    cmd_im   = f'{IM} "{input_path}" -auto-orient -strip -define png:compression-level=9 "{out}"'
+                    cmd_vips = ["vips", "copy", input_path, f"{out}[compression=9]"]
+                    cmd_im   = [IM, input_path, "-auto-orient", "-strip", "-define", "png:compression-level=9", out]
                 elif t == "webp":
-                    cmd_vips = f'vips copy "{input_path}" "{out}"[Q=82]'
-                    cmd_im   = f'{IM} "{input_path}" -auto-orient -strip -define webp:method=6 -quality 82 "{out}"'
+                    cmd_vips = ["vips", "copy", input_path, f"{out}[Q=82]"]
+                    cmd_im   = [IM, input_path, "-auto-orient", "-strip", "-define", "webp:method=6", "-quality", "82", out]
                 elif t == "avif":
-                    cmd_vips = f'vips copy "{input_path}" "{out}"[Q=60,effort=5]'
-                    cmd_im   = f'{IM} "{input_path}" -auto-orient -strip -define heic:speed=4 -quality 60 "{out}"'
+                    cmd_vips = ["vips", "copy", input_path, f"{out}[Q=60,effort=5]"]
+                    cmd_im   = [IM, input_path, "-auto-orient", "-strip", "-define", "heic:speed=4", "-quality", "60", out]
                 else:
                     raise ValueError("formato de imagen no soportado")
 
@@ -173,10 +207,8 @@ def convert_task(self, input_path: str, kind: str, target: str):
 
             # Resto de formatos (IM directo)
             elif t in {"bmp", "tiff", "ico", "psd", "exr", "jp2", "heic", "heif", "gif"}:
-                convert_image_im(input_path, out, t)
-                log = f"ImageMagick -> {t}"
+                convert_image_im(input_path, out, t) # esta función llama a run
 
-            # SVG como salida no tiene sentido (vector real). Solo usar SVG como entrada.
             elif t == "svg":
                 raise ValueError("SVG como salida no soportado (solo entrada).")
 
@@ -191,6 +223,8 @@ def convert_task(self, input_path: str, kind: str, target: str):
                 "gltf":"gltf2","glb":"glb2",
             }
             if t == "3mf":
+                # Este caso sigue requiriendo ejecución de script de Python, 
+                # que es más seguro que shell injection.
                 fc_script = os.path.join(tmpdir, "export_3mf.py")
                 with open(fc_script, "w") as fcs:
                     fcs.write(f"""
@@ -204,10 +238,11 @@ doc.recompute()
 Mesh.export([obj], r"{out}")
 print("OK")
 """)
-                cmd = f'freecadcmd "{fc_script}"'
+                cmd = ["freecadcmd", fc_script] # MODO SEGURO
                 log = run(cmd)
             elif t in assimp_map:
-                cmd = f'assimp export "{input_path}" "{out}" -f {assimp_map[t]}'
+                # MODO SEGURO
+                cmd = ["assimp", "export", input_path, out, "-f", assimp_map[t]]
                 log = run(cmd)
             elif t in ("blend","step","iges","dxf","dwg"):
                 raise ValueError("BLEND/STEP/IGES/DXF/DWG requieren Blender/FreeCAD/ODA (pendiente).")
@@ -216,8 +251,8 @@ print("OK")
         else:
             raise ValueError("kind inválido")
 
-        url = upload(out)
-        return {"download_url": url, "log": log}
+        file_key = upload(out) # Ahora devuelve la clave
+        return {"file_key": file_key, "log": log} # Cambiamos 'download_url' por 'file_key'
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
         try:
@@ -227,63 +262,64 @@ print("OK")
 
 # ====== Descargas evitando HLS (m3u8) ======
 UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-BASE_YTDLP = f'yt-dlp --no-playlist -N 4 -R 10 --retry-sleep 1 --user-agent "{UA}"'
+# BASE_YTDLP ahora se maneja como lista de argumentos
+BASE_YTDLP_ARGS = ['yt-dlp', '--no-playlist', '-N', '4', '-R', '10', '--retry-sleep', '1', '--user-agent', UA]
 
 @celery.task(bind=True)
 def download_task(self, url: str, kind: str, quality: str):
-    """
-    kind: "video" | "audio"
-    quality:
-      - video: "best", "1080p", "720p", "480p", "360p"
-      - audio: "best", "256k", "128k"
-    """
     tmpdir = tempfile.mkdtemp()
     try:
         if not any(url.startswith(p) for p in ("http://", "https://")):
             raise ValueError("URL no válida")
 
+        # Esto genera un nombre de archivo seguro porque lo maneja yt-dlp
         out_tmpl = f'{tmpdir}/%(title).70s.%(ext)s'
-
+        
+        args = []
         if kind == "video":
-            # Evitar HLS (m3u8) y preferir MP4/M4A
             if quality == "best":
                 fmt = 'bv*[protocol!=m3u8][ext=mp4]+ba[protocol!=m3u8][ext=m4a]/bv*[protocol!=m3u8]+ba/best'
             else:
                 h = ''.join(ch for ch in quality if ch.isdigit()) or "720"
                 fmt = f'bv*[height<={h}][protocol!=m3u8][ext=mp4]+ba[protocol!=m3u8][ext=m4a]/best[height<={h}]'
-            cmd = (
-                f'{BASE_YTDLP} -f "{fmt}" '
-                f'--merge-output-format mp4 '
-                f'-o "{out_tmpl}" "{url}"'
+            
+            args = (
+                BASE_YTDLP_ARGS +
+                ['-f', fmt] +
+                ['--merge-output-format', 'mp4'] +
+                ['-o', out_tmpl, url]
             )
 
         elif kind == "audio":
-            # Preferir M4A y evitar HLS; exportar MP3 con calidad solicitada
             fmt = 'ba[protocol!=m3u8][ext=m4a]/bestaudio'
             if quality == "best":
-                aq = "0"; ppa = ""
+                aq = "0"; ppa = []
             elif quality == "256k":
-                aq = "0"; ppa = '--postprocessor-args "-b:a 256k"'
+                aq = "0"; ppa = ['--postprocessor-args', '-b:a 256k']
             elif quality == "128k":
-                aq = "5"; ppa = '--postprocessor-args "-b:a 128k"'
+                aq = "5"; ppa = ['--postprocessor-args', '-b:a 128k']
             else:
-                aq = "0"; ppa = ""
-            cmd = (
-                f'{BASE_YTDLP} -f "{fmt}" -x --audio-format mp3 --audio-quality {aq} '
-                f'{ppa} -o "{out_tmpl}" "{url}"'
+                aq = "0"; ppa = []
+                
+            args = (
+                BASE_YTDLP_ARGS +
+                ['-f', fmt] +
+                ['-x', '--audio-format', 'mp3', '--audio-quality', aq] +
+                ppa +
+                ['-o', out_tmpl, url]
             )
 
         else:
             raise ValueError("kind inválido (usa 'video' o 'audio')")
-
-        log = run(cmd)
+            
+        log = run(args)
 
         files = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir)]
         if not files:
             raise RuntimeError("No se generó ningún archivo")
 
-        url_out = upload(files[0])
-        return {"download_url": url_out, "log": log}
+        file_key = upload(files[0]) # Ahora devuelve la clave
+        return {"file_key": file_key, "log": log} # Cambiamos 'download_url' por 'file_key'
 
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
