@@ -62,9 +62,10 @@ cd mcd
 
 ⚠️ **WARNING**  
 The program contains the script `start_BASE.sh`, which will delete all current containers and volumes.  
-This script is more for freeing up space than for starting.  
+This script is more for freeing up space than for starting. 
+In recent versions we have change this script to kill itself in case of detecting alien containers. This is for protecting producction environments
 
-If you want to bring the container back up without losing anything, we recommend using `start.sh`.
+If you want to bring the container back up without losing anything, we recommend using `start.sh` or  `start_SAFE.sh`.
 
 ---
 # ---------------------- Spanish  ----------------------
@@ -133,5 +134,6 @@ cd mcd
 ⚠️ **ADVERTENCIA**  
 El programa contiene el script `start_BASE.sh`, que borrará todos los contenedores y volúmenes actuales.  
 Este script está pensado más para liberar espacio que para iniciar.  
+En versiones recientes hemos modificado este script para que se detenga de inmediato en cuanto detecte contenedores agenos. Esto esta hecho para proteger entornos de producción
 
-En caso de querer volver a levantar el contenedor sin perder nada, recomendamos usar `start.sh`.
+En caso de querer volver a levantar el contenedor sin perder nada, recomendamos usar `start.sh` o `start_SAFE.sh` .
