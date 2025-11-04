@@ -8,7 +8,7 @@ from typing import List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from worker import convert_task, download_task
+from worker import convert_task, download_task, clean_up_file
 
 app = FastAPI(title="Media Convert & Fetch")
 
@@ -123,23 +123,37 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def root():
     return FileResponse("static/index.html")
 
-# ====================== NUEVO ENDPOINT DE DESCARGA ======================
+# ====================== ENDPOINT DE DESCARGA CON LIMPIEZA ======================
 
 @app.get("/api/download/{key:path}")
 async def download_file(key: str):
     """
-    Descarga archivos desde MinIO vía API sin exponer la URL interna.
+    Descarga archivos desde MinIO vía API y dispara la limpieza asíncrona.
     key: la ruta relativa que devuelve la función 'upload' en worker.py
     """
     try:
         file_obj = io.BytesIO()
+        
+        # 1. Descargar el objeto de MinIO a la memoria de la API
         s3_client.download_fileobj(BUCKET, key, file_obj)
         file_obj.seek(0)
         filename = key.split("/")[-1]
+
+        # 2. Disparar la tarea de limpieza asíncrona (Celery Worker)
+        # Se programa la eliminación del archivo para después de 5 segundos.
+        # Esto asegura que la API tenga tiempo de empezar a servir el archivo.
+        clean_up_file.apply_async(args=[key], countdown=5)
+
+        # 3. Iniciar la transferencia del archivo al cliente (browser)
         return StreamingResponse(
             file_obj,
             media_type="application/octet-stream",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
-    except ClientError:
-        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    except ClientError as e:
+        # Maneja casos donde el archivo no existe (404/NoSuchKey)
+        code = e.response.get("Error", {}).get("Code")
+        if code in ("404", "NoSuchKey"):
+             raise HTTPException(status_code=404, detail="Archivo no encontrado o ya eliminado")
+        else:
+             raise

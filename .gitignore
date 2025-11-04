@@ -1,8 +1,5 @@
-# Ignorar carpetas de caché de Python
+# Contenido recomendado para .gitignore
 __pycache__/
-
-# Ignorar archivos compilados de Python
 *.pyc
-
-# Ignorar archivos temporales
-*.tmp
+*.f*.m4a
+*.f*.mp4

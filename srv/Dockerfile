@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Base: FFmpeg + ImageMagick + delegates principales
+# Base: FFmpeg + ImageMagick + delegados principales
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ffmpeg \
@@ -19,23 +19,25 @@ RUN apt-get update && \
         aria2 \
         curl \
         ca-certificates \
-        git \
-        yt-dlp && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+        git && \
+    # Instalación opcional de plugins HEIF/AVIF
+    apt-get install -y --no-install-recommends libheif-plugin-aom || true && \
+    apt-get install -y --no-install-recommends libheif-plugin-x265 || true && \
+    apt-get install -y --no-install-recommends libx265-206 || \
+    apt-get install -y --no-install-recommends libx265-199 || true && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
-# Intento opcional de instalar plugins HEIF/AVIF para escritura en ImageMagick.
-# Si no existen en tu repo, no pasa nada: seguirá adelante (|| true).
-RUN apt-get update && \
-    (apt-get install -y --no-install-recommends libheif-plugin-aom || true) && \
-    (apt-get install -y --no-install-recommends libheif-plugin-x265 || true) && \
-    (apt-get install -y --no-install-recommends libx265-206 || \
-     apt-get install -y --no-install-recommends libx265-199 || true) && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+# Verificación de FFmpeg
+RUN which ffmpeg || (echo "ERROR: FFmpeg no se encontró en el PATH. La construcción fallará." && exit 1)
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-EXPOSE 8000
-CMD ["uvicorn","app:app","--host","0.0.0.0","--port","8000"]
 
+# Instalar dependencias Python
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt yt-dlp
+
+COPY . .
+
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

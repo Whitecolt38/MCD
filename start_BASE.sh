@@ -1,5 +1,5 @@
 #!/bin/bash
-# Script para iniciar la app MCD desde cero, seguro y controlado
+# Script agresivo para iniciar la app MCD desde cero de forma segura y verbose
 
 cd "$(dirname "$0")" || exit 1
 
@@ -24,7 +24,6 @@ if [[ -n "$ALIEN_CONTAINER_IDS" ]]; then
     ALIEN_CONTAINER_COUNT=$(echo "$CLEAN_ALIEN_IDS" | wc -l)
 
     if [[ "$ALIEN_CONTAINER_COUNT" -gt 0 ]]; then
-        # Obtener nombres de contenedores ajenos correctamente
         ALIEN_CONTAINER_NAMES=$(echo "$CLEAN_ALIEN_IDS" | xargs -r -n1 docker inspect --format '{{.Name}}' | sed 's/^\/\|$/ /g')
         echo "🚨 ERROR DE SEGURIDAD: ¡Contenedores ajenos detectados!"
         echo "El script ha sido CANCELADO para evitar daños."
@@ -34,31 +33,30 @@ if [[ -n "$ALIEN_CONTAINER_IDS" ]]; then
     fi
 fi
 
-# --- 2. CONFIRMACIÓN DEL USUARIO ---
-PROJECT_CONTAINERS=$(docker ps --filter "name=${PROJECT_NAME}-" --format "{{.Names}}")
-if [[ -n "$PROJECT_CONTAINERS" ]]; then
-    echo "Contenedores del proyecto detectados:"
-    echo "$PROJECT_CONTAINERS"
-    echo ""
-    read -p "⚠️  Se van a eliminar y recrear TODOS los contenedores del proyecto desde cero. ¿Desea continuar? (s/n) " CONFIRM
-    if [[ "$CONFIRM" != "s" && "$CONFIRM" != "S" ]]; then
-        echo "Operación cancelada por el usuario."
-        exit 0
-    fi
+# --- 2. CONFIRMACIONES ---
+echo "⚠️  ATENCIÓN: Este script eliminará **todos los contenedores, redes y volúmenes** de la aplicación actual y reconstruirá todo desde cero."
+read -p "¿Quieres continuar? (s/N): " confirm1
+if [[ "$confirm1" != "s" && "$confirm1" != "S" ]]; then
+    echo "❌ Cancelado por el usuario."
+    exit 1
 fi
 
-# --- 3. ELIMINAR CONTENEDORES DEL PROYECTO ---
-PROJECT_IDS=$(docker ps -a --filter "name=${PROJECT_NAME}-" -q)
-if [[ -n "$PROJECT_IDS" ]]; then
-    echo ">>> Deteniendo contenedores del proyecto..."
-    docker stop $PROJECT_IDS > /dev/null 2>&1
-    echo ">>> Eliminando contenedores del proyecto..."
-    docker rm $PROJECT_IDS > /dev/null 2>&1
+echo "⚠️  Segunda confirmación: esta acción es irreversible para su aplicación."
+read -p "Escribe 'erease' para continuar: " confirm2
+if [[ "$confirm2" != "erease" ]]; then
+    echo "❌ Cancelado por el usuario."
+    exit 1
 fi
 
-# --- 4. LEVANTAR EL STACK DESDE CERO ---
-echo ">>> Levantando contenedores de MCD desde cero..."
-docker compose up -d
+# --- 3. ELIMINAR RECURSOS DE LA APP (VERBOSE) ---
+echo "🛑 Deteniendo y eliminando contenedores, redes y volúmenes de la aplicación..."
+docker compose down -v --rmi local
 
-echo ">>> Contenedores en ejecución:"
-docker compose ps
+# --- 4. RECONSTRUIR IMÁGENES Y LEVANTAR CONTENEDORES (VERBOSE) ---
+echo "🔨 Construyendo imágenes desde cero..."
+docker compose build --no-cache
+
+echo "🚀 Levantando servicios en segundo plano..."
+docker compose up -d --force-recreate
+
+echo "✅ Todo listo. Use 'docker compose ps' para ver el estado de los contenedores."
