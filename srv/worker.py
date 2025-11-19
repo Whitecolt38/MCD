@@ -6,24 +6,77 @@ from botocore.exceptions import ClientError
 from typing import List 
 import re 
 import glob # Se añade para buscar el archivo final de yt-dlp 
+from datetime import datetime, timedelta, timezone
 
+# Importar la nueva configuración de tareas periódicas
+import beat_config # Asume que worker.py se ejecuta como un módulo
 # ====== Config ====== 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0") 
 MINIO_URL = os.getenv("MINIO_URL", "http://minio:9000") 
 MINIO_KEY = os.getenv("MINIO_ACCESS_KEY", "minio") 
 MINIO_SEC = os.getenv("MINIO_SECRET_KEY", "minio12345") 
 BUCKET = os.getenv("MINIO_BUCKET", "jobs") 
-# PUBLIC_URL ya no se usa, porque la descarga es via API 
 TASK_TIMEOUT_SECS = int(os.getenv("TASK_TIMEOUT_SECS", "900")) # 15 min 
 
-# ====== Celery & S3 ====== 
-celery = Celery("worker", broker=REDIS_URL, backend=REDIS_URL) 
+# =======================================================
+# ====== Celery & S3 ==================
+# =======================================================
+
+# 1. Definición del objeto Celery
+celery = Celery(
+    "worker", 
+    broker=REDIS_URL, 
+    backend=REDIS_URL,
+    include=['worker'], 
+)
+
+# 2. DEFINICIÓN DEL CLIENTE S3/MINIO (MOVIDO AQUÍ)
 s3 = boto3.client( 
     "s3", 
     endpoint_url=MINIO_URL, 
     aws_access_key_id=MINIO_KEY, 
     aws_secret_access_key=MINIO_SEC, 
-) 
+)
+
+# 3. Configuración de Celery (usa el diccionario beat_config)
+celery.conf.update(
+    beat_schedule=beat_config.CELERY_BEAT_SCHEDULE,
+    result_expires=timedelta(days=1).total_seconds(), 
+)
+
+# 4. Tarea de Limpieza Profunda (que ahora tiene acceso a 's3')
+@celery.task 
+def minio_deep_cleanup_task(days_old: int = 7):
+    """
+    Recorre el bucket de MinIO y elimina objetos que tienen más de 'days_old'.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff_time = now - timedelta(days=days_old)
+    
+    print(f"Iniciando limpieza profunda de MinIO: eliminando archivos anteriores a {cutoff_time.isoformat()}")
+
+    paginator = s3.get_paginator('list_objects_v2')
+    pages = paginator.paginate(Bucket=BUCKET)
+    
+    deleted_count = 0
+    
+    for page in pages:
+        if 'Contents' in page:
+            for obj in page['Contents']:
+                # Asegura que la hora sea consciente de la zona horaria para la comparación
+                last_modified = obj['LastModified'].replace(tzinfo=timezone.utc)
+                
+                # Comprobar si el objeto es más antiguo que el tiempo de corte
+                if last_modified < cutoff_time:
+                    try:
+                        s3.delete_object(Bucket=BUCKET, Key=obj['Key'])
+                        deleted_count += 1
+                        print(f"    [DELETED] {obj['Key']} (Modificado: {last_modified})")
+                    except Exception as e:
+                        print(f"    [ERROR] No se pudo eliminar {obj['Key']}: {e}")
+
+    print(f"Limpieza profunda terminada. Total de archivos eliminados: {deleted_count}")
+    return {"deleted_count": deleted_count}
 
 # ====== Ensure bucket ====== 
 def ensure_bucket(): 
@@ -112,22 +165,51 @@ def convert_image_im(input_path: str, out_path: str, ext: str):
         cmd = [IM] + args_list + [input_path, out_path] 
         run(cmd) 
 
-# Versión segura de upload: solo devuelve la clave, ahora con sanitización del nombre. 
+# Versión segura de upload: solo devuelve la clave, ahora con limpieza de emergencia. 
 def upload(path: str) -> str: 
     ensure_bucket() 
     # 1. Obtener el nombre original del archivo 
     filename = os.path.basename(path) 
     
     # 2. Sanear el nombre del archivo para que sea seguro en MinIO/S3 y URLs. 
-    # Reemplazar caracteres que NO son alfanuméricos, ni guiones bajos, ni puntos, ni guiones por "_". 
     safe_filename = re.sub(r'[^\w\.\-\_]', '_', filename) 
     
     # 3. Construir la clave usando el nombre sanitizado 
     key = f"{uuid.uuid4().hex}/{safe_filename}" 
     
-    s3.upload_file(path, BUCKET, key) 
-    # Ya NO se genera ni se devuelve la URL pre-firmada. 
-    return key 
+    # === LÓGICA DE SUBIDA CON REINTENTO Y LIMPIEZA FORZADA ===
+    
+    # Intentar subir el archivo
+    try:
+        s3.upload_file(path, BUCKET, key)
+        return key
+    
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code")
+        
+        # Manejo de Error Crítico: Almacenamiento lleno (XMinioStorageFull)
+        if code == "XMinioStorageFull":
+            print("❗ ERROR CRÍTICO: MinIO está lleno. Intentando limpieza forzada...")
+            
+            try:
+                # LLAMADA SÍNCRONA A LA LIMPIEZA.
+                # [0.0208] es para borrar archivos de más de 30 minutos (0.5/24).
+                minio_deep_cleanup_task.apply(args=[0.0208]) 
+                print("✅ Limpieza forzada ejecutada (archivos > 30 min eliminados). Reintentando subida...")
+                
+                # Reintentar la subida después de la limpieza
+                s3.upload_file(path, BUCKET, key)
+                return key
+                
+            except Exception as clean_e:
+                # Si la limpieza o el reintento fallan, lanzamos el error original
+                print(f"❌ Falló el reintento de subida después de la limpieza: {clean_e}")
+                raise e 
+        
+        # Otros errores de MinIO
+        else:
+            print(f"❌ Error de Cliente S3 inesperado: {code}")
+            raise 
 
 # ====== Tareas ====== 
 @celery.task(bind=True) 
