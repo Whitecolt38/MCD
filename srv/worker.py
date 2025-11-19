@@ -2,14 +2,15 @@ import os, uuid, shutil, tempfile, subprocess
 from celery import Celery 
 import boto3 
 # from urllib.parse import urlparse # Ya no se necesita 
-from botocore.exceptions import ClientError 
+from botocore.exceptions import ClientError
+from boto3.exceptions import S3UploadFailedError
 from typing import List 
 import re 
 import glob # Se añade para buscar el archivo final de yt-dlp 
 from datetime import datetime, timedelta, timezone
 
 # Importar la nueva configuración de tareas periódicas
-import beat_config # Asume que worker.py se ejecuta como un módulo
+import beat_config 
 # ====== Config ====== 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0") 
 MINIO_URL = os.getenv("MINIO_URL", "http://minio:9000") 
@@ -166,50 +167,63 @@ def convert_image_im(input_path: str, out_path: str, ext: str):
         run(cmd) 
 
 # Versión segura de upload: solo devuelve la clave, ahora con limpieza de emergencia. 
-def upload(path: str) -> str: 
-    ensure_bucket() 
-    # 1. Obtener el nombre original del archivo 
-    filename = os.path.basename(path) 
-    
-    # 2. Sanear el nombre del archivo para que sea seguro en MinIO/S3 y URLs. 
-    safe_filename = re.sub(r'[^\w\.\-\_]', '_', filename) 
-    
-    # 3. Construir la clave usando el nombre sanitizado 
-    key = f"{uuid.uuid4().hex}/{safe_filename}" 
+def upload(path: str) -> str:
+    # 1. Obtener los detalles del archivo
+    filename = os.path.basename(path)
+    safe_filename = re.sub(r'[^\w\.\-\_]', '_', filename)
+    key = f"jobs/{uuid.uuid4().hex}/{safe_filename}"
     
     # === LÓGICA DE SUBIDA CON REINTENTO Y LIMPIEZA FORZADA ===
-    
-    # Intentar subir el archivo
-    try:
-        s3.upload_file(path, BUCKET, key)
-        return key
-    
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code")
-        
-        # Manejo de Error Crítico: Almacenamiento lleno (XMinioStorageFull)
-        if code == "XMinioStorageFull":
-            print("❗ ERROR CRÍTICO: MinIO está lleno. Intentando limpieza forzada...")
+    # Intentamos la subida (y la preparación del bucket)
+
+    for attempt in range(2): # Intentamos la subida 2 veces (inicial + reintento)
+        try:
+            # 1. Asegurar el bucket (puede fallar con XMinioStorageFull si el bucket no existe y el disco está lleno)
+            # ESTA FUNCIÓN DEBE ESTAR DENTRO DEL TRY/REINTENTO.
+            ensure_bucket() 
             
-            try:
-                # LLAMADA SÍNCRONA A LA LIMPIEZA.
-                # [0.0208] es para borrar archivos de más de 30 minutos (0.5/24).
-                minio_deep_cleanup_task.apply(args=[0.0208]) 
-                print("✅ Limpieza forzada ejecutada (archivos > 30 min eliminados). Reintentando subida...")
+            # 2. Subir el archivo (la subida puede fallar con S3UploadFailedError si el disco se llena durante la transferencia)
+            s3.upload_file(path, BUCKET, key)
+            return key # Éxito: Salimos de la función y del bucle
+
+        # --- MANEJO DEL ERROR DE MINIO LLENO ---
+        except (ClientError, S3UploadFailedError) as e:
+            
+            # Buscamos el código 'XMinioStorageFull' en cualquiera de las excepciones
+            is_full_error = False
+            if isinstance(e, ClientError):
+                code = e.response.get("Error", {}).get("Code")
+                if code == "XMinioStorageFull":
+                    is_full_error = True
+            elif isinstance(e, S3UploadFailedError):
+                # S3UploadFailedError contiene la causa como una cadena en el mensaje
+                if 'XMinioStorageFull' in str(e):
+                    is_full_error = True
+
+            if is_full_error and attempt == 0:
+                print("❗ ERROR CRÍTICO: MinIO está lleno. Intentando limpieza forzada...")
                 
-                # Reintentar la subida después de la limpieza
-                s3.upload_file(path, BUCKET, key)
-                return key
-                
-            except Exception as clean_e:
-                # Si la limpieza o el reintento fallan, lanzamos el error original
-                print(f"❌ Falló el reintento de subida después de la limpieza: {clean_e}")
-                raise e 
-        
-        # Otros errores de MinIO
-        else:
-            print(f"❌ Error de Cliente S3 inesperado: {code}")
-            raise 
+                try:
+                    # LLAMADA SÍNCRONA a la limpieza (0.0208 horas = 30 minutos).
+                    minio_deep_cleanup_task.apply(args=[0.0208]) 
+                    print("✅ Limpieza forzada ejecutada (archivos > 30 min eliminados). Reintentando subida...")
+                    # El bucle for pasa automáticamente a la segunda iteración (attempt=1)
+                    continue 
+
+                except Exception as clean_e:
+                    # Si la limpieza falla, lanzamos el error de MinIO original para evitar la pérdida de contexto
+                    print(f"❌ Falló la ejecución de la limpieza: {clean_e}")
+                    raise e
+            
+            # Si es el segundo intento (attempt == 1) o es un error diferente:
+            else:
+                if is_full_error and attempt == 1:
+                    print("❌ Falló el reintento de subida tras la limpieza.")
+                # Si es un error que no sea XMinioStorageFull, o si falló el reintento.
+                raise e
+
+    # Esto no debería ser alcanzado si el bucle está bien configurado, pero se deja por seguridad.
+    raise Exception("Fallo la subida al MinIO después de todos los intentos.")
 
 # ====== Tareas ====== 
 @celery.task(bind=True) 
