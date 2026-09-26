@@ -26,6 +26,29 @@ s3_client = boto3.client(
     aws_access_key_id=MINIO_KEY,
     aws_secret_access_key=MINIO_SEC
 )
+# --- AUTO-ACTUALIZACIÓN DIARIA DE YT-DLP EN SEGUNDO PLANO ---
+def auto_update_ytdlp_periodically():
+    """Comprueba y actualiza yt-dlp automáticamente cada 24 horas en segundo plano."""
+    while True:
+        try:
+            # Espera 24 horas (86400 segundos) antes de cada comprobación
+            time.sleep(86400)
+            print("[Auto-Update] Comprobando actualizaciones para yt-dlp...")
+            subprocess.run(
+                ["pip", "install", "--no-cache-dir", "--upgrade", "yt-dlp"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print("[Auto-Update] yt-dlp actualizado correctamente.")
+        except Exception as e:
+            print(f"[Auto-Update] Error al intentar actualizar yt-dlp: {e}")
+
+@app.on_event("startup")
+def startup_event():
+    """Inicia el hilo en segundo plano al arrancar la API."""
+    update_thread = threading.Thread(target=auto_update_ytdlp_periodically, daemon=True)
+    update_thread.start()
 # --- catálogos para clasificar por extensión (mismo criterio que frontend) ---
 IMG_EXT = {"jpg","jpeg","png","webp","avif","bmp","tif","tiff","ico","psd","exr","jp2","heic","heif","gif","svg"}
 VID_EXT = {"mp4","webm","mkv","mov","avi","m4v","mpeg","mpg","ts","3gp","3g2","ogv","flv"}
