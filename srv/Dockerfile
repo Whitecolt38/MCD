@@ -40,4 +40,4 @@ RUN pip install --upgrade pip && \
 COPY . .
 
 EXPOSE 8000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD sh -c "pip install --no-cache-dir --upgrade yt-dlp && uvicorn app:app --host 0.0.0.0 --port 8000"
