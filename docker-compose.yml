@@ -37,7 +37,6 @@ services:
       MINIO_SECRET_KEY: minio12345
       MINIO_BUCKET: jobs
       SHARED_DIR: /shared
-      MINIO_PUBLIC_URL: http://192.168.29.131:9000
       TZ: Europe/Madrid
     volumes:
       - ./srv:/app
@@ -61,7 +60,6 @@ services:
       MINIO_SECRET_KEY: minio12345
       MINIO_BUCKET: jobs
       SHARED_DIR: /shared
-      MINIO_PUBLIC_URL: http://192.168.29.131:9000
       TZ: Europe/Madrid
     volumes:
       - ./srv:/app
