@@ -1,16 +1,15 @@
-import os, uuid, shutil, tempfile, subprocess 
+import os, uuid, shutil, tempfile, subprocess, threading, time
 from celery import Celery 
 import boto3 
-# from urllib.parse import urlparse # Ya no se necesita 
 from botocore.exceptions import ClientError
 from boto3.exceptions import S3UploadFailedError
 from typing import List 
 import re 
-import glob # Se añade para buscar el archivo final de yt-dlp 
+import glob 
 from datetime import datetime, timedelta, timezone
 
 # Importar la nueva configuración de tareas periódicas
-import beat_config 
+import beat_config
 # ====== Config ====== 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0") 
 MINIO_URL = os.getenv("MINIO_URL", "http://minio:9000") 
@@ -19,6 +18,27 @@ MINIO_SEC = os.getenv("MINIO_SECRET_KEY", "minio12345")
 BUCKET = os.getenv("MINIO_BUCKET", "jobs") 
 TASK_TIMEOUT_SECS = int(os.getenv("TASK_TIMEOUT_SECS", "900")) # 15 min 
 
+# --- AUTO-ACTUALIZACIÓN DIARIA DE YT-DLP EN SEGUNDO PLANO (WORKER) ---
+def auto_update_ytdlp_periodically():
+    """Comprueba y actualiza yt-dlp automáticamente cada 24 horas en segundo plano."""
+    while True:
+        try:
+            # Espera 24 horas (86400 segundos) antes de cada comprobación
+            time.sleep(86400)
+            print("[Auto-Update Worker] Comprobando actualizaciones para yt-dlp...")
+            subprocess.run(
+                ["pip", "install", "--no-cache-dir", "--upgrade", "yt-dlp"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print("[Auto-Update Worker] yt-dlp actualizado correctamente.")
+        except Exception as e:
+            print(f"[Auto-Update Worker] Error al intentar actualizar yt-dlp: {e}")
+
+# Iniciar el hilo en segundo plano nada más arrancar el módulo del worker
+update_thread = threading.Thread(target=auto_update_ytdlp_periodically, daemon=True)
+update_thread.start()
 # =======================================================
 # ====== Celery & S3 ==================
 # =======================================================
